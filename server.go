@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+	"net"
 )
 
 //############ CHATROOM TYPE AND METHODS
@@ -24,7 +25,7 @@ func (cr *ChatRoom) Init() {
 	go func(){
 		for {
 			cr.BroadCast()
-			time.Sleep(1000)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}()
 }
@@ -101,6 +102,7 @@ func (cl *Client) Send(msgs string) {
 //global variable for handling all chat traffic
 var chat ChatRoom
 
+
 //##############SERVING STATIC FILES
 func staticFiles(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "./static/"+r.URL.Path)
@@ -113,10 +115,9 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true }, //not checking origin
 }
 
-//this is also the handler for joining to the game
+//this is also the handler for joining to the chat
 func wsHandler(w http.ResponseWriter, r *http.Request) {
 
-	fmt.Println("websocket init")
 	conn, err := upgrader.Upgrade(w, r, nil)
 
 	if err != nil {
@@ -125,8 +126,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	go func() {
 		//first message has to be the name
-		_, msg, err := conn.ReadMessage() //first return value is `messageType` which we don't need
-		fmt.Println(msg,err)
+		_, msg, err := conn.ReadMessage() 
 		client := chat.Join(string(msg), conn)
 		if client == nil || err != nil {
 			conn.Close() //closing connection to indicate failed Join
@@ -140,16 +140,31 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 				client.Exit()
 				return
 			}
-			// fmt.Println(string(msg))
 			client.NewMsg(string(msg))
 		}
 
 	}()
 }
 
+//Printing out the various ways the server can be reached by the clients
+func printClientConnInfo(){
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		fmt.Println("Oops: " + err.Error())
+		return
+	}
+ 
+	fmt.Println("Chat clients can connect at the following addresses:\n")
+
+	for _, a := range addrs {
+		fmt.Println("http://"+a.String()+":8000/\n")
+	}	
+}
+
 //#############MAIN FUNCTION and INITIALIZATIONS
 
 func main() {
+	printClientConnInfo();
 	http.HandleFunc("/ws", wsHandler)
 	http.HandleFunc("/", staticFiles)
 	chat.Init()
