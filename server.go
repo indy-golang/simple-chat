@@ -3,15 +3,17 @@ package main
 import (
 	"./websocket" //gorilla websocket implementation
 	"fmt"
+	"net"
 	"net/http"
 	"time"
-	"net"
+	"sync"
 )
 
 //############ CHATROOM TYPE AND METHODS
 
 type ChatRoom struct {
 	clients map[string]Client
+	clientsMtx sync.Mutex
 	queue   chan string
 }
 
@@ -22,7 +24,7 @@ func (cr *ChatRoom) Init() {
 	cr.clients = make(map[string]Client)
 
 	//the "heartbeat" for broadcasting messages
-	go func(){
+	go func() {
 		for {
 			cr.BroadCast()
 			time.Sleep(100 * time.Millisecond)
@@ -33,6 +35,9 @@ func (cr *ChatRoom) Init() {
 //registering a new client
 //returns pointer to a Client, or Nil, if the name is already taken
 func (cr *ChatRoom) Join(name string, conn *websocket.Conn) *Client {
+	defer cr.clientsMtx.Unlock();
+
+	cr.clientsMtx.Lock(); //preventing simultaneous access to the `clients` map
 	if _, exists := cr.clients[name]; exists {
 		return nil
 	}
@@ -42,14 +47,17 @@ func (cr *ChatRoom) Join(name string, conn *websocket.Conn) *Client {
 		belongsTo: cr,
 	}
 	cr.clients[name] = client
-	cr.AddMsg("<B>"+name + "</B> has joined the chat.")
+	 
+	cr.AddMsg("<B>" + name + "</B> has joined the chat.")
 	return &client
 }
 
 //leaving the chatroom
 func (cr *ChatRoom) Leave(name string) {
-	cr.AddMsg("<B>"+name + "</B> has left the chat.")
+	cr.clientsMtx.Lock(); //preventing simultaneous access to the `clients` map
 	delete(cr.clients, name)
+	cr.clientsMtx.Unlock(); 
+	cr.AddMsg("<B>" + name + "</B> has left the chat.")
 }
 
 //adding message to queue
@@ -86,7 +94,7 @@ type Client struct {
 
 //Client has a new message to broadcast
 func (cl *Client) NewMsg(msg string) {
-	cl.belongsTo.AddMsg("<B>"+cl.name + ":</B> " + msg)
+	cl.belongsTo.AddMsg("<B>" + cl.name + ":</B> " + msg)
 }
 
 //Exiting out
@@ -101,7 +109,6 @@ func (cl *Client) Send(msgs string) {
 
 //global variable for handling all chat traffic
 var chat ChatRoom
-
 
 //##############SERVING STATIC FILES
 func staticFiles(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +133,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	go func() {
 		//first message has to be the name
-		_, msg, err := conn.ReadMessage() 
+		_, msg, err := conn.ReadMessage()
 		client := chat.Join(string(msg), conn)
 		if client == nil || err != nil {
 			conn.Close() //closing connection to indicate failed Join
@@ -147,24 +154,26 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 //Printing out the various ways the server can be reached by the clients
-func printClientConnInfo(){
+func printClientConnInfo() {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		fmt.Println("Oops: " + err.Error())
 		return
 	}
- 
+
 	fmt.Println("Chat clients can connect at the following addresses:\n")
 
 	for _, a := range addrs {
-		fmt.Println("http://"+a.String()+":8000/\n")
-	}	
+		if a.String() != "0.0.0.0" {
+			fmt.Println("http://" + a.String() + ":8000/\n")
+		}
+	}
 }
 
 //#############MAIN FUNCTION and INITIALIZATIONS
 
 func main() {
-	printClientConnInfo();
+	printClientConnInfo()
 	http.HandleFunc("/ws", wsHandler)
 	http.HandleFunc("/", staticFiles)
 	chat.Init()
