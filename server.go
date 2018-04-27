@@ -1,7 +1,7 @@
 package main
 
 import (
-	"./websocket" //gorilla websocket implementation
+	"github.com/indy-golang/simple-chat/websocket" //gorilla websocket implementation
 	"fmt"
 	"net"
 	"net/http"
